@@ -1,11 +1,11 @@
 package src;
 
-class Intersection {
-    public Sphere sphere;
+public class Intersection {
+    public Renderable object;
     public double t;
 
-    public Intersection(Sphere sphere, double t) {
-        this.sphere = sphere;
+    public Intersection(Renderable object, double t) {
+        this.object = object;
         this.t = t;
     }
 }

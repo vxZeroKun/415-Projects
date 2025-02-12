@@ -29,12 +29,20 @@ public class Vector {
         return Math.sqrt(this.x * this.x + this.y * this.y + this.z * this.z);
     }
 
-    // Normalize method to make the vector a unit vector (length = 1)
+    // Normalize the vector (make its length equal to 1)
     public Vector normalize() {
         double len = length();
         if (len == 0) {
             return new Vector(0, 0, 0); // Prevent division by zero
         }
         return new Vector(this.x / len, this.y / len, this.z / len);
+    }
+
+    // Cross product
+    public Vector cross(Vector other) {
+        return new Vector(
+                this.y * other.z - this.z * other.y,
+                this.z * other.x - this.x * other.z,
+                this.x * other.y - this.y * other.x);
     }
 }

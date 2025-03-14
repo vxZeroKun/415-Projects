@@ -1,0 +1,268 @@
+#ifdef GL_ES
+precision mediump float;
+#endif
+
+#define MAX_DEPTH 3
+
+// --- Utility Functions ---
+
+// Returns a pseudo-random number in [0,1] based on a 2D seed.
+float rand(vec2 co) {
+  return fract(sin(dot(co, vec2(12.9898,78.233))) * 43758.5453);
+}
+
+// Ray-sphere intersection: returns the hit distance t (>0.001) or -1.0 if none.
+float intersectSphere(vec3 ro, vec3 rd, vec3 center, float radius) {
+  vec3 oc = ro - center;
+  float a = dot(rd, rd);
+  float b = 2.0 * dot(oc, rd);
+  float c = dot(oc, oc) - radius * radius;
+  float disc = b * b - 4.0 * a * c;
+  if(disc < 0.0) return -1.0;
+  float sqrtDisc = sqrt(disc);
+  float t1 = (-b - sqrtDisc) / (2.0 * a);
+  float t2 = (-b + sqrtDisc) / (2.0 * a);
+  if(t1 > 0.001) return t1;
+  if(t2 > 0.001) return t2;
+  return -1.0;
+}
+
+// Checks if a ray (ro, rd) hits any object in the scene between tMin and tMax.
+// This is used for shadows.
+bool sceneIntersect(vec3 ro, vec3 rd, float tMin, float tMax) {
+  float t;
+  // Ground sphere
+  t = intersectSphere(ro, rd, vec3(0.0, -1000.0, 0.0), 1000.0);
+  if(t > 0.001 && t < tMax) return true;
+  
+  // Grid spheres (from a=-11 to 10, b=-11 to 10)
+  for (int a = -11; a < 11; a++) {
+    for (int b = -11; b < 11; b++) {
+      vec2 seed = vec2(float(a), float(b));
+      float r1 = rand(seed);
+      float r2 = rand(seed + vec2(10.0));
+      vec3 center = vec3(float(a) + 0.9 * r1, 0.2, float(b) + 0.9 * r2);
+      // Skip spheres too near (4,0.2,0)
+      if (length(center - vec3(4.0, 0.2, 0.0)) > 0.9) {
+        t = intersectSphere(ro, rd, center, 0.2);
+        if(t > 0.001 && t < tMax) return true;
+      }
+    }
+  }
+  
+  // Feature spheres
+  t = intersectSphere(ro, rd, vec3(0.0, 1.0, 0.0), 1.0);
+  if(t > 0.001 && t < tMax) return true;
+  t = intersectSphere(ro, rd, vec3(-4.0, 1.0, 0.0), 1.0);
+  if(t > 0.001 && t < tMax) return true;
+  t = intersectSphere(ro, rd, vec3(4.0, 1.0, 0.0), 1.0);
+  if(t > 0.001 && t < tMax) return true;
+  
+  return false;
+}
+
+// Computes lighting at point P with normal N and view direction V.
+// Uses an ambient light plus one point light and one directional light.
+float computeLighting(vec3 P, vec3 N, vec3 V, float specular) {
+  float intensity = 0.0;
+  // Ambient
+  intensity += 0.5;
+  
+  // Point light at (10,10,10)
+  vec3 lightPos = vec3(10.0, 10.0, 10.0);
+  vec3 L = lightPos - P;
+  float lenL = length(L);
+  L = normalize(L);
+  if(!sceneIntersect(P + N * 0.001, L, 0.001, lenL)) {
+    float nDotL = max(dot(N, L), 0.0);
+    intensity += 0.5 * nDotL;
+    if(specular >= 0.0) {
+      vec3 R = reflect(-L, N);
+      float rDotV = max(dot(R, V), 0.0);
+      intensity += 0.5 * pow(rDotV, specular);
+    }
+  }
+  
+  // Directional light from (-1,-1,-1)
+  L = normalize(vec3(-1.0, -1.0, -1.0));
+  if(!sceneIntersect(P + N * 0.001, L, 0.001, 1e9)) {
+    float nDotL = max(dot(N, L), 0.0);
+    intensity += 0.2 * nDotL;
+    if(specular >= 0.0) {
+      vec3 R = reflect(-L, N);
+      float rDotV = max(dot(R, V), 0.0);
+      intensity += 0.2 * pow(rDotV, specular);
+    }
+  }
+  
+  return intensity;
+}
+
+// --- Main Ray Tracing Function ---
+
+void mainImage( out vec4 fragColor, in vec2 fragCoord )
+{
+  // Normalize pixel coordinates (0..1)
+  vec2 uv = fragCoord / iResolution.xy;
+  
+  // --- Camera Setup ---
+  vec3 ro = vec3(13.0, 2.0, 3.0);  // Camera position (lookfrom)
+  vec3 lookat = vec3(0.0, 0.0, 0.0);
+  vec3 vup = vec3(0.0, 1.0, 0.0);
+  float vfov = radians(20.0);
+  float aspect = iResolution.x / iResolution.y;
+  
+  // Compute camera basis vectors.
+  vec3 w = normalize(ro - lookat);
+  vec3 u = normalize(cross(vup, w));
+  vec3 v = cross(w, u);
+  
+  float viewportHeight = 2.0 * tan(vfov / 2.0);
+  float viewportWidth = aspect * viewportHeight;
+  float focusDist = 10.0;
+  
+  vec3 horizontal = u * viewportWidth * focusDist;
+  vec3 vertical = v * viewportHeight * focusDist;
+  vec3 lowerLeft = ro - horizontal * 0.5 - vertical * 0.5 - w * focusDist;
+  
+  // Compute ray direction for this fragment.
+  // (A jitter term could be added for anti-aliasing.)
+  vec2 s = (fragCoord) / iResolution.xy;
+  vec3 rd = normalize(lowerLeft + horizontal * s.x + vertical * s.y - ro);
+  
+  // --- Ray Tracing Loop (with up to MAX_DEPTH reflections) ---
+  vec3 col = vec3(0.0);
+  vec3 attenuation = vec3(1.0);
+  
+  // For storing grid sphere hit info.
+  vec3 gridHitCenter = vec3(0.0);
+  vec2 gridHitSeed = vec2(0.0);
+  int hitType = -1; // 0: ground, 1: grid sphere, 2: glass (center), 3: diffuse (-4,1,0), 4: metal (4,1,0)
+  
+  for(int depth = 0; depth < MAX_DEPTH; depth++) {
+    float tClosest = 1e9;
+    hitType = -1;
+    
+    float t;
+    // Ground sphere.
+    t = intersectSphere(ro, rd, vec3(0.0, -1000.0, 0.0), 1000.0);
+    if(t > 0.001 && t < tClosest) {
+      tClosest = t;
+      hitType = 0;
+    }
+    
+    // Grid spheres.
+    for (int a = -11; a < 11; a++) {
+      for (int b = -11; b < 11; b++) {
+        vec2 seed = vec2(float(a), float(b));
+        float r1 = rand(seed);
+        float r2 = rand(seed + vec2(10.0));
+        vec3 center = vec3(float(a) + 0.9 * r1, 0.2, float(b) + 0.9 * r2);
+        if(length(center - vec3(4.0, 0.2, 0.0)) > 0.9) {
+          t = intersectSphere(ro, rd, center, 0.2);
+          if(t > 0.001 && t < tClosest) {
+            tClosest = t;
+            hitType = 1;
+            gridHitCenter = center;
+            gridHitSeed = seed;
+          }
+        }
+      }
+    }
+    
+    // Feature spheres.
+    t = intersectSphere(ro, rd, vec3(0.0, 1.0, 0.0), 1.0);
+    if(t > 0.001 && t < tClosest) {
+      tClosest = t;
+      hitType = 2;
+    }
+    t = intersectSphere(ro, rd, vec3(-4.0, 1.0, 0.0), 1.0);
+    if(t > 0.001 && t < tClosest) {
+      tClosest = t;
+      hitType = 3;
+    }
+    t = intersectSphere(ro, rd, vec3(4.0, 1.0, 0.0), 1.0);
+    if(t > 0.001 && t < tClosest) {
+      tClosest = t;
+      hitType = 4;
+    }
+    
+    // If no hit, add background and exit.
+    if(hitType == -1) {
+      vec3 unitDir = normalize(rd);
+      float t_bg = 0.5 * (unitDir.y + 1.0);
+      vec3 background = mix(vec3(1.0), vec3(0.5, 0.7, 1.0), t_bg);
+      col += attenuation * background;
+      break;
+    }
+    
+    // Compute hit point and its surface normal.
+    vec3 hitPoint = ro + tClosest * rd;
+    vec3 normal;
+    vec3 sphereColor;
+    float specular;
+    float reflective;
+    
+    if(hitType == 0) {
+      normal = normalize(hitPoint - vec3(0.0, -1000.0, 0.0));
+      sphereColor = vec3(0.5);
+      specular = -1.0;
+      reflective = 0.0;
+    } else if(hitType == 1) {
+      normal = normalize(hitPoint - gridHitCenter);
+      float chooseMat = rand(gridHitSeed);
+      if(chooseMat < 0.8) {
+        // Diffuse: use squared random values for color.
+        vec3 albedo = vec3(rand(gridHitSeed + vec2(20.0)),
+                           rand(gridHitSeed + vec2(30.0)),
+                           rand(gridHitSeed + vec2(40.0)));
+        sphereColor = albedo * albedo;
+        specular = -1.0;
+        reflective = 0.0;
+      } else if(chooseMat < 0.95) {
+        // Metal.
+        sphereColor = vec3(0.5 + 0.5 * rand(gridHitSeed + vec2(50.0)),
+                           0.5 + 0.5 * rand(gridHitSeed + vec2(60.0)),
+                           0.5 + 0.5 * rand(gridHitSeed + vec2(70.0)));
+        specular = 500.0;
+        reflective = 0.5;
+      } else {
+        // Glass.
+        sphereColor = vec3(1.0);
+        specular = 500.0;
+        reflective = 0.9;
+      }
+    } else if(hitType == 2) {
+      normal = normalize(hitPoint - vec3(0.0, 1.0, 0.0));
+      sphereColor = vec3(1.0);
+      specular = 500.0;
+      reflective = 0.9;
+    } else if(hitType == 3) {
+      normal = normalize(hitPoint - vec3(-4.0, 1.0, 0.0));
+      sphereColor = vec3(0.4, 0.2, 0.1);
+      specular = -1.0;
+      reflective = 0.0;
+    } else if(hitType == 4) {
+      normal = normalize(hitPoint - vec3(4.0, 1.0, 0.0));
+      sphereColor = vec3(0.7, 0.6, 0.5);
+      specular = 500.0;
+      reflective = 0.5;
+    }
+    
+    // Compute local shading using our lighting model.
+    float intensity = computeLighting(hitPoint, normal, -rd, specular);
+    vec3 localColor = sphereColor * intensity;
+    col += attenuation * localColor;
+    
+    // If the material is reflective, update the ray; otherwise, exit.
+    if(reflective > 0.0) {
+      rd = reflect(rd, normal);
+      ro = hitPoint;
+      attenuation *= reflective;
+    } else {
+      break;
+    }
+  }
+  
+  fragColor = vec4(col, 1.0);
+}

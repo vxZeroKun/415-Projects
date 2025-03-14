@@ -8,6 +8,6 @@
    javac -d bin src/\*.java
 3. Run the program:
    java -cp bin src.Main
-4. an output image will be created under Task 2+3 folder
+4. an output image will be created under Task final folder
 
 ![Output Image](output.png)

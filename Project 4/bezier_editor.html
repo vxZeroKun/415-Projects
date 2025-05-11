@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Bezier Curve Editor</title>
+  <title>Bezier Curve Editor (Poly Bézier)</title>
   <style>
     body { display: flex; flex-direction: column; align-items: center; font-family: sans-serif; margin: 20px; }
     #canvas { border: 1px solid #ccc; cursor: crosshair; }
@@ -12,12 +12,12 @@
   </style>
 </head>
 <body>
-  <h1>Bezier Curve Editor</h1>
+  <h1>Bezier Curve Editor (Poly Bézier)</h1>
   <div id="controls">
     <button id="resetBtn">Reset</button>
   </div>
   <canvas id="canvas" width="800" height="600"></canvas>
-  <div id="instructions">Click to add control point 1/4</div>
+  <div id="instructions"></div>
   <script>
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
@@ -27,11 +27,21 @@
     let controlPoints = [];
     let draggingIndex = null;
 
+    function updateInstructions() {
+      if (controlPoints.length < 4) {
+        instructions.textContent = `Click to add control point ${controlPoints.length + 1}/4 for initial segment.`;
+      } else {
+        const extra = controlPoints.length - 4;
+        const segmentNum = Math.floor(extra / 3) + 2;
+        const pointNum = (extra % 3) + 1;
+        instructions.textContent = `Click to add control point ${pointNum}/3 for segment ${segmentNum}. Drag points to adjust, or Reset to start over.`;
+      }
+    }
+
     function draw() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-
       // draw control polygon
-      if (controlPoints.length > 0) {
+      if (controlPoints.length > 1) {
         ctx.strokeStyle = '#aaa';
         ctx.setLineDash([5, 5]);
         ctx.beginPath();
@@ -40,19 +50,22 @@
         ctx.stroke();
         ctx.setLineDash([]);
       }
-
-      // draw Bezier curve
-      if (controlPoints.length === 4) {
-        ctx.strokeStyle = '#000';
-        ctx.beginPath();
-        for (let t = 0; t <= 1; t += 0.01) {
-          const p = cubicBezier(controlPoints, t);
-          if (t === 0) ctx.moveTo(p.x, p.y);
-          else ctx.lineTo(p.x, p.y);
+      // draw each Bezier segment
+      const totalSegments = Math.floor((controlPoints.length - 1) / 3);
+      for (let s = 0; s < totalSegments; s++) {
+        const startIndex = s * 3;
+        const pts = controlPoints.slice(startIndex, startIndex + 4);
+        if (pts.length === 4) {
+          ctx.strokeStyle = '#000';
+          ctx.beginPath();
+          for (let t = 0; t <= 1; t += 0.01) {
+            const p = cubicBezier(pts, t);
+            if (t === 0) ctx.moveTo(p.x, p.y);
+            else ctx.lineTo(p.x, p.y);
+          }
+          ctx.stroke();
         }
-        ctx.stroke();
       }
-
       // draw control points
       controlPoints.forEach((pt, i) => {
         ctx.fillStyle = i === draggingIndex ? '#f00' : '#00f';
@@ -74,29 +87,24 @@
       return { x, y };
     }
 
-    canvas.addEventListener('click', (e) => {
+    canvas.addEventListener('mousedown', (e) => {
       const rect = canvas.getBoundingClientRect();
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
-      if (controlPoints.length < 4) {
+      let hit = false;
+      for (let i = 0; i < controlPoints.length; i++) {
+        const pt = controlPoints[i];
+        if ((pt.x - x) ** 2 + (pt.y - y) ** 2 < 36) {
+          draggingIndex = i;
+          hit = true;
+          break;
+        }
+      }
+      if (!hit) {
         controlPoints.push({ x, y });
-        instructions.textContent = controlPoints.length < 4 ?
-          'Click to add control point ' + (controlPoints.length + 1) + '/4' :
-          'Drag points to adjust the curve, or Reset to start over.';
-        draw();
       }
-    });
-
-    canvas.addEventListener('mousedown', (e) => {
-      if (controlPoints.length === 4) {
-        const rect = canvas.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const y = e.clientY - rect.top;
-        controlPoints.forEach((pt, i) => {
-          const dx = pt.x - x, dy = pt.y - y;
-          if (dx*dx + dy*dy < 36) draggingIndex = i;
-        });
-      }
+      updateInstructions();
+      draw();
     });
 
     canvas.addEventListener('mousemove', (e) => {
@@ -113,10 +121,12 @@
     resetBtn.addEventListener('click', () => {
       controlPoints = [];
       draggingIndex = null;
-      instructions.textContent = 'Click to add control point 1/4';
+      updateInstructions();
       draw();
     });
 
+    // initialize
+    updateInstructions();
     draw();
   </script>
 </body>

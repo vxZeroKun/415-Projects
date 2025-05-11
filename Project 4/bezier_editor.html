@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Bezier Curve Editor</title>
+  <style>
+    body { display: flex; flex-direction: column; align-items: center; font-family: sans-serif; margin: 20px; }
+    #canvas { border: 1px solid #ccc; cursor: crosshair; }
+    #controls { margin: 10px; }
+    button { padding: 8px 12px; font-size: 14px; }
+    #instructions { margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <h1>Bezier Curve Editor</h1>
+  <div id="controls">
+    <button id="resetBtn">Reset</button>
+  </div>
+  <canvas id="canvas" width="800" height="600"></canvas>
+  <div id="instructions">Click to add control point 1/4</div>
+  <script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const resetBtn = document.getElementById('resetBtn');
+    const instructions = document.getElementById('instructions');
+
+    let controlPoints = [];
+    let draggingIndex = null;
+
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // draw control polygon
+      if (controlPoints.length > 0) {
+        ctx.strokeStyle = '#aaa';
+        ctx.setLineDash([5, 5]);
+        ctx.beginPath();
+        ctx.moveTo(controlPoints[0].x, controlPoints[0].y);
+        controlPoints.forEach(pt => ctx.lineTo(pt.x, pt.y));
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+
+      // draw Bezier curve
+      if (controlPoints.length === 4) {
+        ctx.strokeStyle = '#000';
+        ctx.beginPath();
+        for (let t = 0; t <= 1; t += 0.01) {
+          const p = cubicBezier(controlPoints, t);
+          if (t === 0) ctx.moveTo(p.x, p.y);
+          else ctx.lineTo(p.x, p.y);
+        }
+        ctx.stroke();
+      }
+
+      // draw control points
+      controlPoints.forEach((pt, i) => {
+        ctx.fillStyle = i === draggingIndex ? '#f00' : '#00f';
+        ctx.beginPath();
+        ctx.arc(pt.x, pt.y, 6, 0, 2 * Math.PI);
+        ctx.fill();
+      });
+    }
+
+    function cubicBezier(pts, t) {
+      const [p0, p1, p2, p3] = pts;
+      const u = 1 - t;
+      const tt = t * t;
+      const uu = u * u;
+      const uuu = uu * u;
+      const ttt = tt * t;
+      const x = uuu * p0.x + 3 * uu * t * p1.x + 3 * u * tt * p2.x + ttt * p3.x;
+      const y = uuu * p0.y + 3 * uu * t * p1.y + 3 * u * tt * p2.y + ttt * p3.y;
+      return { x, y };
+    }
+
+    canvas.addEventListener('click', (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      if (controlPoints.length < 4) {
+        controlPoints.push({ x, y });
+        instructions.textContent = controlPoints.length < 4 ?
+          'Click to add control point ' + (controlPoints.length + 1) + '/4' :
+          'Drag points to adjust the curve, or Reset to start over.';
+        draw();
+      }
+    });
+
+    canvas.addEventListener('mousedown', (e) => {
+      if (controlPoints.length === 4) {
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        controlPoints.forEach((pt, i) => {
+          const dx = pt.x - x, dy = pt.y - y;
+          if (dx*dx + dy*dy < 36) draggingIndex = i;
+        });
+      }
+    });
+
+    canvas.addEventListener('mousemove', (e) => {
+      if (draggingIndex !== null) {
+        const rect = canvas.getBoundingClientRect();
+        controlPoints[draggingIndex].x = e.clientX - rect.left;
+        controlPoints[draggingIndex].y = e.clientY - rect.top;
+        draw();
+      }
+    });
+
+    canvas.addEventListener('mouseup', () => { draggingIndex = null; });
+
+    resetBtn.addEventListener('click', () => {
+      controlPoints = [];
+      draggingIndex = null;
+      instructions.textContent = 'Click to add control point 1/4';
+      draw();
+    });
+
+    draw();
+  </script>
+</body>
+</html>
